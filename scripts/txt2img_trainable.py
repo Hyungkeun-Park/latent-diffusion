@@ -13,6 +13,8 @@ from ldm.util import instantiate_from_config
 from ldm.models.diffusion.ddim import DDIMSampler
 from ldm.models.diffusion.plms import PLMSSampler
 
+import torchvision
+
 
 def load_model_from_config(config, ckpt, verbose=False):
     print(f"Loading model from {ckpt}")
@@ -39,8 +41,8 @@ if __name__ == "__main__":
         "--prompt",
         type=str,
         nargs="?",
-        default="a painting of a virus monster playing guitar",
-        help="the prompt to render"
+        default="shark",
+        help="the class to render"
     )
 
     parser.add_argument(
@@ -93,7 +95,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--n_samples",
         type=int,
-        default=4,
+        default=1,
         help="how many samples to produce for the given prompt",
     )
 
@@ -106,7 +108,7 @@ if __name__ == "__main__":
     opt = parser.parse_args()
 
 
-    config = OmegaConf.load("configs/latent-diffusion/txt2img-1p4B-eval.yaml")  # TODO: Optionally download from same location as ckpt and chnage this logic
+    config = OmegaConf.load("configs/latent-diffusion/txt2img-1p4B-eval_trainable.yaml")  # TODO: Optionally download from same location as ckpt and chnage this logic
     model = load_model_from_config(config, "models/ldm/text2img-large/model.ckpt")  # TODO: check path
 
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
@@ -128,7 +130,27 @@ if __name__ == "__main__":
     base_count = len(os.listdir(sample_path))
 
     all_samples=list()
-    with torch.no_grad():
+
+    #=======================================================
+
+    test_model = torchvision.models.resnet34(weights=torchvision.models.ResNet34_Weights.IMAGENET1K_V1).to(device)
+    test_model.eval()
+    #print(list(model.named_children()))
+
+    #optimizer = torch.optim.SGD(model.cond_stage_model.transformer.ctx,lr=0.002,momentum=0.9,weight_decay=0.0005)
+    trainable_prompt = model.cond_stage_model.transformer.ctx
+    trainable = {'params':trainable_prompt}
+    #trainable = {'params':model.cond_stage_model.transformer.ctx,}
+    optimizer = torch.optim.SGD([trainable],lr=0.1,momentum=0.9,weight_decay=0.0005)
+
+    #print(optimizer)
+
+    #=======================================================
+
+    iter=100
+
+    for i in range(iter):
+        #with torch.no_grad():
         with model.ema_scope():
             uc = None
             if opt.scale != 1.0:
@@ -137,22 +159,49 @@ if __name__ == "__main__":
                 c = model.get_learned_conditioning(opt.n_samples * [prompt])
                 shape = [4, opt.H//8, opt.W//8]
                 samples_ddim, _ = sampler.sample(S=opt.ddim_steps,
-                                                 conditioning=c,
-                                                 batch_size=opt.n_samples,
-                                                 shape=shape,
-                                                 verbose=False,
-                                                 unconditional_guidance_scale=opt.scale,
-                                                 unconditional_conditioning=uc,
-                                                 eta=opt.ddim_eta)
+                                                    conditioning=c,
+                                                    batch_size=opt.n_samples,
+                                                    shape=shape,
+                                                    verbose=False,
+                                                    unconditional_guidance_scale=opt.scale,
+                                                    unconditional_conditioning=uc,
+                                                    eta=opt.ddim_eta)
 
                 x_samples_ddim = model.decode_first_stage(samples_ddim)
                 x_samples_ddim = torch.clamp((x_samples_ddim+1.0)/2.0, min=0.0, max=1.0)
+
+                x_samples_ddim_copy = torch.clone(x_samples_ddim).detach()      #
 
                 for x_sample in x_samples_ddim:
                     x_sample = 255. * rearrange(x_sample.cpu().numpy(), 'c h w -> h w c')
                     Image.fromarray(x_sample.astype(np.uint8)).save(os.path.join(sample_path, f"{base_count:04}.png"))
                     base_count += 1
                 all_samples.append(x_samples_ddim)
+        #
+
+        logit = test_model(x_samples_ddim_copy)
+        
+        ans = torch.nn.functional.softmax(logit,dim=1)
+        print(f"\n\nTeacher's Class : {torch.topk(ans,1)}")
+
+        #print(logit.size())
+        # Class shark = 4
+        target = torch.tensor([4]*opt.n_samples).to(device)
+
+        optimizer.zero_grad()
+        #print(f"\n\nPrompt before step :\n{model.cond_stage_model.transformer.ctx}\n\n")
+        #print(f"\n\nPrompt before step :\n{model.cond_stage_model.transformer.ctx}\n\n")
+        print(f"\n\nOptimizer's Zero Grad : {optimizer.param_groups[0]['params'][0].grad}")
+        loss = torch.nn.functional.cross_entropy(logit, target)
+        #print(f"\n\nLoss value : {loss}\n\n")
+        loss.backward()
+        
+        #print(f"\n\nPrompt after step :\n{model.cond_stage_model.transformer.ctx}\n\n")
+        #print(f"\n\nPrompt after step :\n{model.cond_stage_model.transformer.ctx}\n\n")
+        print(f"\n\nOptimizer's Grad : {optimizer.param_groups[0]['params'][0].grad}")
+        optimizer.step()
+
+
 
 
     # additionally, save as grid

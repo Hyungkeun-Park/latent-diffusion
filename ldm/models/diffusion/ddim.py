@@ -52,7 +52,7 @@ class DDIMSampler(object):
                         1 - self.alphas_cumprod / self.alphas_cumprod_prev))
         self.register_buffer('ddim_sigmas_for_original_num_steps', sigmas_for_original_sampling_steps)
 
-    @torch.no_grad()
+    #@torch.no_grad()
     def sample(self,
                S,
                batch_size,
@@ -109,7 +109,7 @@ class DDIMSampler(object):
                                                     )
         return samples, intermediates
 
-    @torch.no_grad()
+    #@torch.no_grad()
     def ddim_sampling(self, cond, shape,
                       x_T=None, ddim_use_original_steps=False,
                       callback=None, timesteps=None, quantize_denoised=False,
@@ -161,7 +161,7 @@ class DDIMSampler(object):
 
         return img, intermediates
 
-    @torch.no_grad()
+    #@torch.no_grad()
     def p_sample_ddim(self, x, c, t, index, repeat_noise=False, use_original_steps=False, quantize_denoised=False,
                       temperature=1., noise_dropout=0., score_corrector=None, corrector_kwargs=None,
                       unconditional_guidance_scale=1., unconditional_conditioning=None):

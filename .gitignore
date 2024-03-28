@@ -1,0 +1,4 @@
+ldm/models/ldm/text2img-large/model.ckpt
+ldm/models/rdm/rdm768x768/model.ckpt
+src
+*.ckpt
